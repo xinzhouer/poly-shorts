@@ -4,8 +4,16 @@ import { Home } from './pages/Home';
 import { Detail } from './pages/Detail';
 import { Player } from './pages/Player';
 import { Upload } from './pages/Upload';
+import { useEffect } from 'react';
+import { useStore } from './store/useStore';
 
 function App() {
+  const { fetchData } = useStore();
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   return (
     <Router>
       <Routes>

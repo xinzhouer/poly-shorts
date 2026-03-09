@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { ChevronLeft, Upload as UploadIcon, Image, Video } from 'lucide-react';
 import { Series, Episode } from '../types';
+import { supabase } from '../lib/supabase';
 
 export const Upload: React.FC = () => {
   const navigate = useNavigate();
-  const { addSeries, addEpisode } = useStore();
+  const { addSeries, addEpisode, fetchData } = useStore();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -14,6 +15,24 @@ export const Upload: React.FC = () => {
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+
+  const uploadFile = async (file: File, bucket: 'covers' | 'videos') => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random()}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, file);
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    return data.publicUrl;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,52 +42,63 @@ export const Upload: React.FC = () => {
     }
 
     setIsSubmitting(true);
+    setUploadProgress('Starting upload...');
 
     try {
-      // Generate IDs
-      const seriesId = `s_${Date.now()}`;
-      const episodeId = `${seriesId}_ep_1`;
+      // 1. Upload Cover
+      setUploadProgress('Uploading cover image...');
+      const coverUrl = await uploadFile(coverFile, 'covers');
 
-      // Create object URLs for preview (Note: these are temporary and will expire on refresh)
-      const coverUrl = URL.createObjectURL(coverFile);
-      const videoUrl = URL.createObjectURL(videoFile);
+      // 2. Upload Video
+      setUploadProgress('Uploading video file (this may take a while)...');
+      const videoUrl = await uploadFile(videoFile, 'videos');
 
-      const newSeries: Series = {
-        id: seriesId,
-        title,
-        description,
-        coverUrl,
-        status: 'Ongoing',
-        tags: ['User Upload', 'Shorts'],
-        totalEpisodes: 1,
-        rating: 5.0,
-        author,
-      };
+      // 3. Insert Series to DB
+      setUploadProgress('Saving metadata...');
+      const { data: seriesData, error: seriesError } = await supabase
+        .from('series')
+        .insert({
+          title,
+          description,
+          cover_url: coverUrl,
+          author,
+          status: 'Ongoing',
+          tags: ['User Upload', 'Shorts'],
+          total_episodes: 1,
+          rating: 5.0,
+        })
+        .select()
+        .single();
 
-      const newEpisode: Episode = {
-        id: episodeId,
-        seriesId,
-        episodeNumber: 1,
-        title: 'Episode 1',
-        thumbnailUrl: coverUrl, // Reuse cover as thumbnail for simplicity
-        videoUrl,
-        duration: 60, // Mock duration
-        likes: 0,
-        comments: 0,
-        shares: 0,
-      };
+      if (seriesError) throw seriesError;
 
-      // Add to store
-      addSeries(newSeries);
-      addEpisode(newEpisode);
+      // 4. Insert Episode to DB
+      const { data: episodeData, error: episodeError } = await supabase
+        .from('episodes')
+        .insert({
+          series_id: seriesData.id,
+          episode_number: 1,
+          title: 'Episode 1',
+          thumbnail_url: coverUrl,
+          video_url: videoUrl,
+          duration: 60,
+        })
+        .select()
+        .single();
 
-      // Navigate to the new series
-      navigate(`/series/${seriesId}`);
-    } catch (error) {
+      if (episodeError) throw episodeError;
+
+      // 5. Update Local Store
+      await fetchData();
+
+      alert('Upload successful! Your series is now live.');
+      navigate('/');
+    } catch (error: any) {
       console.error('Upload failed:', error);
-      alert('Upload failed. Please try again.');
+      alert(`Upload failed: ${error.message || 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
+      setUploadProgress('');
     }
   };
 
@@ -81,11 +111,12 @@ export const Upload: React.FC = () => {
         <h1 className="text-xl font-bold">Upload Short Drama</h1>
       </header>
 
-      <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-6 text-xs text-yellow-200">
-        Note: This is a local preview mode. Uploaded content is stored in memory and will disappear if you refresh the page.
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Status Message */}
+      {isSubmitting && (
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 mb-6 text-xs text-blue-200 animate-pulse">
+          {uploadProgress}
+        </div>
+      )}
         {/* Series Info */}
         <div className="space-y-4">
           <div>
