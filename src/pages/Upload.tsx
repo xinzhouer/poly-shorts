@@ -117,6 +117,8 @@ export const Upload: React.FC = () => {
           {uploadProgress}
         </div>
       )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
         {/* Series Info */}
         <div className="space-y-4">
           <div>
